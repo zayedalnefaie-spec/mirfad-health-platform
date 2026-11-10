@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
 import { InventoryView } from './components/InventoryView';
@@ -24,15 +24,41 @@ import {
   ResponseOffer, 
   AuditLogEntry 
 } from './types';
+import { 
+  fetchInventory, 
+  fetchRequests, 
+  fetchAuditLogs, 
+  createSupplyRequest, 
+  submitOffer, 
+  acceptOffer, 
+  confirmReceipt 
+} from './services/api';
 import { CheckCircle2, AlertCircle, Info } from 'lucide-react';
 
 export default function App() {
-  // Global State
+  const isApiEnabled = import.meta.env.VITE_USE_API === 'true';
+
+  // Global State (defaults to bundled initial data for instant offline review)
   const [currentUser, setCurrentUser] = useState<UserProfile>(DEMO_USERS[0]);
   const [activeView, setActiveView] = useState<string>('dashboard');
   const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
   const [requests, setRequests] = useState<SupplyRequest[]>(INITIAL_SUPPLY_REQUESTS);
   const [logs, setLogs] = useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
+
+  // Load from backend API when VITE_USE_API is explicitly enabled
+  useEffect(() => {
+    if (isApiEnabled) {
+      Promise.all([
+        fetchInventory().catch(() => INITIAL_INVENTORY),
+        fetchRequests().catch(() => INITIAL_SUPPLY_REQUESTS),
+        fetchAuditLogs().catch(() => INITIAL_AUDIT_LOGS)
+      ]).then(([remoteInventory, remoteRequests, remoteLogs]) => {
+        setInventory(remoteInventory);
+        setRequests(remoteRequests);
+        setLogs(remoteLogs);
+      });
+    }
+  }, [isApiEnabled]);
 
   // Modals state
   const [isSupplyModalOpen, setIsSupplyModalOpen] = useState<boolean>(false);
@@ -52,7 +78,7 @@ export default function App() {
     }, 4500);
   };
 
-  // Helper to add audit log
+  // Helper to add audit log to local working state
   const addAuditLog = (
     action: string, 
     details: string, 
@@ -73,14 +99,42 @@ export default function App() {
   };
 
   // 1. Submit New Supply Request
-  const handleCreateRequest = (newRequest: SupplyRequest) => {
+  const handleCreateRequest = async (newRequest: SupplyRequest) => {
+    if (isApiEnabled) {
+      try {
+        const created = await createSupplyRequest(newRequest);
+        setRequests(prev => [created, ...prev]);
+        const refreshedLogs = await fetchAuditLogs().catch(() => null);
+        if (refreshedLogs) setLogs(refreshedLogs);
+        showToast(`تم بث طلب الإمداد رقم ${created.requestNumber} بنجاح إلى شبكة المستشفيات`);
+        return;
+      } catch (err) {
+        console.warn('API error, falling back to local state:', err);
+      }
+    }
+
+    // Local offline state fallback
     setRequests(prev => [newRequest, ...prev]);
     addAuditLog('إنشاء وبث طلب إمداد', `بث طلب ${newRequest.itemNameAr} بكمية ${newRequest.quantityRequested} ${newRequest.unit}`, 'request');
     showToast(`تم بث طلب الإمداد رقم ${newRequest.requestNumber} بنجاح إلى شبكة المستشفيات`);
   };
 
   // 2. Submit Response Offer from a facility
-  const handleSubmitOffer = (requestId: string, offer: ResponseOffer) => {
+  const handleSubmitOffer = async (requestId: string, offer: ResponseOffer) => {
+    if (isApiEnabled) {
+      try {
+        const res = await submitOffer(requestId, offer);
+        setRequests(prev => prev.map(r => r.id === requestId ? res.request : r));
+        const refreshedLogs = await fetchAuditLogs().catch(() => null);
+        if (refreshedLogs) setLogs(refreshedLogs);
+        showToast(`تم إرسال عرض الاستجابة بنجاح إلى المنشأة الطالبة`);
+        return;
+      } catch (err) {
+        console.warn('API error, falling back to local state:', err);
+      }
+    }
+
+    // Local offline state fallback
     setRequests(prev => prev.map(req => {
       if (req.id === requestId) {
         const updatedOffers = [...req.offers, offer];
@@ -98,14 +152,28 @@ export default function App() {
   };
 
   // 3. Accept Offer & Reserve Quantity
-  const handleAcceptOffer = (requestId: string, offerId: string) => {
+  const handleAcceptOffer = async (requestId: string, offerId: string) => {
+    if (isApiEnabled) {
+      try {
+        const res = await acceptOffer(requestId, offerId, currentUser.name);
+        setRequests(prev => prev.map(r => r.id === requestId ? res.request : r));
+        const refreshedLogs = await fetchAuditLogs().catch(() => null);
+        if (refreshedLogs) setLogs(refreshedLogs);
+        showToast(`تم اعتماد العرض وحجز الكمية بنجاح! الشحنة الآن بالمسار الميداني`);
+        setSelectedTrackingRequestId(requestId);
+        return;
+      } catch (err) {
+        console.warn('API error, falling back to local state:', err);
+      }
+    }
+
+    // Local offline state fallback
     setRequests(prev => prev.map(req => {
       if (req.id === requestId) {
         const updatedOffers = req.offers.map(o => ({
           ...o,
           status: o.id === offerId ? ('accepted' as const) : ('declined' as const)
         }));
-        const accepted = updatedOffers.find(o => o.id === offerId);
 
         return {
           ...req,
@@ -138,16 +206,36 @@ export default function App() {
   };
 
   // 4. Confirm Receipt & Reconcile Stock
-  const handleConfirmReceipt = (
+  const handleConfirmReceipt = async (
     requestId: string, 
     actualQuantity: number, 
     signatureName: string, 
     notes: string
   ) => {
+    if (isApiEnabled) {
+      try {
+        const res = await confirmReceipt(requestId, {
+          actualQuantity,
+          signatureName,
+          notes
+        });
+        setRequests(prev => prev.map(r => r.id === requestId ? res.request : r));
+        if (res.reconciledItem) {
+          setInventory(prev => prev.map(item => item.id === res.reconciledItem?.id ? res.reconciledItem! : item));
+        }
+        const refreshedLogs = await fetchAuditLogs().catch(() => null);
+        if (refreshedLogs) setLogs(refreshedLogs);
+        showToast(`تم اعتماد الفحص والاستلام بنجاح، وتحديث رصيد المخزون التبادلي`);
+        return;
+      } catch (err) {
+        console.warn('API error, falling back to local state:', err);
+      }
+    }
+
+    // Local offline state fallback
     const targetReq = requests.find(r => r.id === requestId);
     if (!targetReq) return;
 
-    // Update request state
     setRequests(prev => prev.map(req => {
       if (req.id === requestId) {
         return {
@@ -351,14 +439,14 @@ export default function App() {
             <span>·</span>
             <button 
               onClick={() => setIsTourModalOpen(true)}
-              className="text-[#087A5C] hover:underline"
+              className="text-[#087A5C] hover:underline cursor-pointer"
             >
               دليل الاستخدام
             </button>
             <span>·</span>
             <button 
               onClick={() => setActiveView('hackathon')}
-              className="text-[#09AAA8] hover:underline"
+              className="text-[#09AAA8] hover:underline cursor-pointer"
             >
               ملف الابتكار
             </button>
