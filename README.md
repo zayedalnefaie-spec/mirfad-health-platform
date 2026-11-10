@@ -127,15 +127,18 @@ npm run dev
 ```
 Open `http://localhost:3000` in your browser. When `VITE_USE_API="true"`, Vite automatically proxies `/api/*` calls to the reference backend on `http://localhost:8787`.
 
-### Running the Test Suite
-Execute the built-in Node test suite:
+### Running the Test Suite & Validation
+Execute the complete verification pipeline:
 ```bash
 npm test
 ```
-This runs `server/api.test.ts` via Node's native test runner (`node:test` + native `fetch`), validating:
-1. Health check response metadata and prototype labels.
-2. Filtered query execution on critical stock items.
-3. Creation of an auditable supply request and cryptographic SHA-256 audit trail generation.
+The `npm test` script validates the full system contract across three sequential gates:
+1. **TypeScript Validation (`npm run lint`):** Performs strict static type checking via `tsc --noEmit` across all client and server code with Node and DOM global typings.
+2. **Reference API Integration Tests (`npm run test:api`):** Executes `server/api.test.ts` via `node --import tsx --test`, verifying:
+   - Prototype health check metadata, mode labels, and persistence descriptors.
+   - Filtered inventory queries on critical stock items.
+   - Auditable supply request lifecycle and cryptographic SHA-256 audit trail generation.
+3. **Production Frontend Build (`npm run build`):** Verifies that Vite compiles and bundles the complete production distribution assets without errors.
 
 ---
 
