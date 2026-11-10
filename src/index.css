@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --brand-primary: #087A5C;
+    --brand-teal: #09AAA8;
+    --brand-gold: #DDA745;
+    --brand-dark: #173B43;
+    --brand-red: #D84E53;
+    --brand-bg: #F6F9F9;
+    --brand-border: #DFE9E9;
+  }
+
+  body {
+    font-family: 'Tajawal', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--brand-bg);
+    color: var(--brand-dark);
+  }
+}
+
+/* Custom scrollbars for clean dashboard experience */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F6F9F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #DFE9E9;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #09AAA8;
+}
